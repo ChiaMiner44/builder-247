@@ -1,42 +1,20 @@
 # Prometheus Swarm
 
-A framework for building AI agents with Python.
+## Running Tests with Coverage
 
-## Features
+To run tests with coverage:
 
-- FastAPI-based web framework
-- SQLAlchemy for database operations
-- Redis and Celery for task queue management
-- OpenAI integration
-- Authentication and authorization
-- Async support
-- Comprehensive testing setup
-
-## Installation
-
+1. Install test dependencies:
 ```bash
-pip install prometheus-swarm
+pip install .[test]
 ```
 
-## Quick Start
-
-```python
-from prometheus_swarm.clients import setup_client
+2. Run tests:
+```bash
+./run_tests.sh
 ```
 
-## Requirements
-
-- Python 3.8 or higher
-- See requirements.txt for full dependency list
-
-## Documentation
-
-For detailed documentation, please visit [documentation link].
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+Test reports will be generated in the `test-reports` directory:
+- HTML Coverage Report: `test-reports/coverage/index.html`
+- XML Coverage Report: `test-reports/coverage.xml`
+- Test Report: `test-reports/test_report.html`
