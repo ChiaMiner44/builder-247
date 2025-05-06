@@ -1,6 +1,7 @@
 import redis
 import hashlib
 import time
+import os
 from typing import Optional, Union
 
 class NonceCache:
@@ -42,8 +43,9 @@ class NonceCache:
             str: Hashed nonce key.
         """
         payload_str = str(payload)
-        timestamp = str(int(time.time()))
-        combined = f"{payload_str}:{timestamp}"
+        timestamp = str(time.time_ns())  # Use nanosecond precision
+        random_bytes = os.urandom(16).hex()  # Add cryptographically secure random bytes
+        combined = f"{payload_str}:{timestamp}:{random_bytes}"
         return hashlib.sha256(combined.encode()).hexdigest()
 
     def store_nonce(self, nonce_key: str) -> bool:
@@ -63,7 +65,7 @@ class NonceCache:
                 value=1
             )
             return bool(result)
-        except redis.exceptions.RedisError:
+        except Exception:
             return False
 
     def is_nonce_valid(self, nonce_key: str) -> bool:
@@ -79,7 +81,7 @@ class NonceCache:
         try:
             # Atomically check and delete the nonce
             return bool(self.redis_client.delete(nonce_key))
-        except redis.exceptions.RedisError:
+        except Exception:
             return False
 
     def process_request(self, payload: Union[str, dict, list]) -> Optional[str]:
