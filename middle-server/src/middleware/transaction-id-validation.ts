@@ -2,6 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { performance } from 'perf_hooks';
 import winston from 'winston';
+import { 
+  ITransactionUniquenessService, 
+  InMemoryTransactionUniquenessService 
+} from '../services/transaction-uniqueness/interfaces';
 
 // Create a logger for transaction ID tracking
 const logger = winston.createLogger({
@@ -16,29 +20,21 @@ const logger = winston.createLogger({
   ]
 });
 
-// Uniqueness tracking (in-memory for demonstration)
-const processedTransactionIds = new Set<string>();
-
 interface TransactionIdValidationOptions {
   required?: boolean;
   generateIfMissing?: boolean;
   headerName?: string;
   maxLatency?: number;
+  uniquenessService?: ITransactionUniquenessService;
 }
 
 const DEFAULT_OPTIONS: TransactionIdValidationOptions = {
   required: true,
   generateIfMissing: true,
   headerName: 'X-Transaction-ID',
-  maxLatency: 100 // ms
+  maxLatency: 100, // ms
+  uniquenessService: new InMemoryTransactionUniquenessService()
 };
-
-interface TransactionMetadata {
-  timestamp: number;
-  method: string;
-  path: string;
-  ipAddress: string;
-}
 
 /**
  * Middleware for robust transaction ID validation
@@ -49,8 +45,9 @@ export const transactionIdMiddleware = (
   options: TransactionIdValidationOptions = {}
 ) => {
   const config = { ...DEFAULT_OPTIONS, ...options };
+  const uniquenessService = config.uniquenessService;
 
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const startTime = performance.now();
 
     // Extract or generate transaction ID
@@ -59,6 +56,11 @@ export const transactionIdMiddleware = (
 
     // Validate transaction ID is present if required
     if (config.required && !transactionId) {
+      logger.warn('Transaction ID validation failed: Missing transaction ID', {
+        method: req.method,
+        path: req.path
+      });
+
       return res.status(400).json({
         error: 'Transaction Validation Failed',
         message: `Missing required ${config.headerName} header`
@@ -70,34 +72,64 @@ export const transactionIdMiddleware = (
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       
       if (!uuidRegex.test(transactionId)) {
+        logger.warn('Transaction ID validation failed: Invalid format', {
+          transactionId,
+          method: req.method,
+          path: req.path
+        });
+
         return res.status(400).json({
           error: 'Transaction Validation Failed',
           message: 'Invalid transaction ID format'
         });
       }
 
-      // Check for transaction ID uniqueness
-      if (processedTransactionIds.has(transactionId)) {
-        const metadata: TransactionMetadata = {
+      // Check transaction uniqueness
+      try {
+        const isUnique = await uniquenessService.isUnique({
+          id: transactionId,
           timestamp: Date.now(),
-          method: req.method,
-          path: req.path,
-          ipAddress: req.ip
-        };
-
-        logger.warn('Duplicate Transaction ID Detected', {
-          transactionId,
-          metadata
+          metadata: {
+            method: req.method,
+            path: req.path,
+            ipAddress: req.ip
+          }
         });
 
-        return res.status(409).json({
-          error: 'Transaction Conflict',
-          message: 'Transaction ID has already been processed'
+        if (!isUnique) {
+          logger.warn('Duplicate transaction ID detected', {
+            transactionId,
+            method: req.method,
+            path: req.path
+          });
+
+          return res.status(409).json({
+            error: 'Transaction Conflict',
+            message: 'Transaction ID has already been processed'
+          });
+        }
+
+        // Mark transaction as processed
+        await uniquenessService.markProcessed({
+          id: transactionId,
+          timestamp: Date.now(),
+          metadata: {
+            method: req.method,
+            path: req.path,
+            ipAddress: req.ip
+          }
+        });
+      } catch (error) {
+        logger.error('Transaction uniqueness check failed', {
+          error: error.message,
+          transactionId
+        });
+
+        return res.status(500).json({
+          error: 'Transaction Validation Error',
+          message: 'Unable to validate transaction uniqueness'
         });
       }
-
-      // Mark transaction ID as processed
-      processedTransactionIds.add(transactionId);
     }
 
     // Performance check
@@ -128,9 +160,4 @@ export const transactionIdMiddleware = (
 
     next();
   };
-};
-
-// Utility to clear processed transaction IDs (for testing/cleanup)
-export const clearProcessedTransactionIds = () => {
-  processedTransactionIds.clear();
 };
